@@ -1,0 +1,658 @@
+"use client"
+
+import { useState, useEffect, useRef } from "react"
+import { Button } from "@/components/ui/button"
+import { LogOut, Menu, X, Plus, Send, Mic, Lightbulb } from 'lucide-react'
+import { LoginForm } from "@/components/login-form"
+import { ThemeToggle } from "@/components/theme-toggle"
+
+
+interface UserData {
+  email: string
+  name?                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">How to manage stress at work?</div>
+                    <div className="text-gray-500 dark:text-gray-500 mt-1">Today, 2:30 PM</div>ring
+}
+
+interface Message {
+  role: 'user' | 'assistant'
+  content: string
+  id?: string
+}
+
+export default function Page() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [user, setUser] = useState<UserData | null>(null)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [isChatLoading, setIsChatLoading] = useState(false)
+  const [isTyping, setIsTyping] = useState(false)
+  const [loginStreak, setLoginStreak] = useState(7)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Handle screen size changes and auto-collapse sidebar on mobile
+  useEffect(() => {
+    const handleResize = () => {
+      // Close sidebar when screen becomes smaller than lg breakpoint (1024px)
+      if (window.innerWidth < 1024) {
+        setIsSidebarOpen(false)
+      }
+    }
+
+    // Add event listener
+    window.addEventListener('resize', handleResize)
+    
+    // Check initial screen size
+    handleResize()
+
+    // Cleanup
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  // Auto-scroll to bottom when new message is added
+  useEffect(() => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, 100)
+  }, [messages, isTyping])
+
+  // Handle new chat
+  const handleNewChat = () => {
+    setMessages([])
+    setInput('')
+    setIsTyping(false)
+    setIsChatLoading(false)
+    setIsSidebarOpen(false)
+  }
+
+  // Handle home navigation
+  const handleHomeClick = () => {
+    setIsSidebarOpen(false)
+    setIsTyping(false)
+    setIsChatLoading(false)
+  }
+
+  // Handle input change
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+  }
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || isChatLoading || isTyping) return
+
+    const userMessage: Message = {
+      role: 'user',
+      content: input.trim(),
+      id: Date.now().toString()
+    }
+
+    // Add user message to chat
+    setMessages(prev => [...prev, userMessage])
+    setInput('')
+    setIsChatLoading(true)
+
+    // Show typing indicator after a brief pause
+    setTimeout(() => {
+      setIsTyping(true)
+    }, 500)
+
+    // Wait for typing delay before making API call
+    setTimeout(async () => {
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: [...messages, userMessage],
+            userId: user?.email
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to get response')
+        }
+
+        // Hide typing indicator
+        setIsTyping(false)
+
+        // Handle streaming response
+        const reader = response.body?.getReader()
+        if (!reader) {
+          throw new Error('No response body')
+        }
+
+        const decoder = new TextDecoder()
+        let assistantContent = ''
+
+        // Add assistant message placeholder
+        const assistantId = (Date.now() + 1).toString()
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '',
+          id: assistantId
+        }])
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          const chunk = decoder.decode(value, { stream: true })
+          
+          // Handle the text stream directly
+          assistantContent += chunk
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantId 
+              ? { ...msg, content: assistantContent }
+              : msg
+          ))
+        }
+
+      } catch (error) {
+        console.error('Chat error:', error)
+        // Hide typing indicator
+        setIsTyping(false)
+        // Add error message
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'I apologize, but I encountered an error. Please try again later. If this continues, please check your internet connection or contact support.',
+          id: (Date.now() + 1).toString()
+        }])
+      } finally {
+        setIsChatLoading(false)
+      }
+    }, 2000) // 2 second delay for more realistic feel
+  }
+
+  const updateLoginStreak = () => {
+    const today = new Date().toDateString()
+    const lastLogin = localStorage.getItem('lastLogin')
+    const currentStreak = parseInt(localStorage.getItem('loginStreak') || '0')
+    
+    if (lastLogin) {
+      const lastLoginDate = new Date(lastLogin)
+      const todayDate = new Date(today)
+      const timeDiff = todayDate.getTime() - lastLoginDate.getTime()
+      const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24))
+      
+      if (daysDiff === 1) {
+        // Consecutive day login
+        const newStreak = currentStreak + 1
+        setLoginStreak(newStreak)
+        localStorage.setItem('loginStreak', newStreak.toString())
+        localStorage.setItem('lastLogin', today)
+      } else if (daysDiff > 1) {
+        // Streak broken, reset to 1
+        setLoginStreak(1)
+        localStorage.setItem('loginStreak', '1')
+        localStorage.setItem('lastLogin', today)
+      } else {
+        // Same day login
+        setLoginStreak(currentStreak)
+      }
+    } else {
+      // First time login
+      setLoginStreak(1)
+      localStorage.setItem('loginStreak', '1')
+      localStorage.setItem('lastLogin', today)
+    }
+  }
+
+  const handleLoginSuccess = (userData: UserData) => {
+    setIsAuthenticated(true)
+    setUser(userData)
+  }
+
+  const handleLogout = async () => {
+    try {
+      const res = await fetch("/api/auth/logout", { method: "POST" })
+      if (res.ok) {
+        setIsAuthenticated(false)
+        setUser(null)
+      }
+    } catch (error) {
+      console.error("Logout error:", error)
+    }
+  }
+
+  if (!isAuthenticated) {
+    return <LoginForm onLogin={handleLoginSuccess} />
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Mobile Hamburger Menu Button */}
+      <div className="lg:hidden fixed top-4 left-4 z-50">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className="h-10 w-10 bg-white dark:bg-gray-800 shadow-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+        >
+          {isSidebarOpen ? (
+            <X className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+          ) : (
+            <Menu className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+          )}
+        </Button>
+      </div>
+
+      {/* Overlay for mobile sidebar */}
+      {isSidebarOpen && (
+        <div 
+          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar - Responsive */}
+      <div className={`
+        fixed left-0 top-0 w-64 h-full bg-white dark:bg-gray-800 shadow-lg rounded-r-lg border-r border-gray-200 dark:border-gray-700 z-50 transform transition-transform duration-300 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0 lg:block
+      `}>
+        <div className="flex flex-col h-full">
+          {/* Logo/Brand Header */}
+          <div className="p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-purple-600 dark:text-purple-400 animate-pulse hover:scale-110 transition-transform duration-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                    <path d="M12 8V4H8"/>
+                    <rect width="16" height="12" x="4" y="8" rx="2"/>
+                    <path d="M2 14h2"/>
+                    <path d="M20 14h2"/>
+                    <path d="M15 13v2"/>
+                    <path d="M9 13v2"/>
+                  </svg>
+                </div>
+                <span className="text-xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                  Zoebot
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Search Bar */}
+          <div className="px-6 pb-4">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search..."
+                className="w-full px-3 py-2 pl-10 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+              />
+              <svg className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+          </div>
+
+          {/* Main Menu Items */}
+          <div className="px-4 pt-2 pb-4 border-b border-gray-200 dark:border-gray-700">
+            <nav className="space-y-2">
+              <button className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:text-purple-700 dark:hover:text-purple-300 rounded-lg transition-colors duration-200 flex items-center space-x-3"
+                onClick={handleHomeClick}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/>
+                  <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                </svg>
+                <span>Home</span>
+              </button>
+              <button className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:text-purple-700 dark:hover:text-purple-300 rounded-lg transition-colors duration-200 flex items-center space-x-3"
+                onClick={() => setIsSidebarOpen(false)}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path d="M12 7v4"/>
+                  <path d="M14 21v-3a2 2 0 0 0-4 0v3"/>
+                  <path d="M14 9h-4"/>
+                  <path d="M18 11h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h2"/>
+                  <path d="M18 21V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16"/>
+                </svg>
+                <span>Sessions</span>
+              </button>
+              <button className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:text-purple-700 dark:hover:text-purple-300 rounded-lg transition-colors duration-200 flex items-center space-x-3"
+                onClick={() => setIsSidebarOpen(false)}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>
+                  <path d="M8.62 9.8A2.25 2.25 0 1 1 12 6.836a2.25 2.25 0 1 1 3.38 2.966l-2.626 2.856a.998.998 0 0 1-1.507 0z"/>
+                </svg>
+                <span>Journal</span>
+              </button>
+              <button className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:text-purple-700 dark:hover:text-purple-300 rounded-lg transition-colors duration-200 flex items-center space-x-3"
+                onClick={() => setIsSidebarOpen(false)}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                  <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
+                  <path d="M2.62 13.8A2.25 2.25 0 1 1 6 10.836a2.25 2.25 0 1 1 3.38 2.966l-2.626 2.856a.998.998 0 0 1-1.507 0z"/>
+                  <path d="M4 6.005V4a2 2 0 0 1 2-2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-1.9-1.376"/>
+                </svg>
+                <span>Resources</span>
+              </button>
+            </nav>
+          </div>
+
+          {/* Time-based Sections with overflow */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-4 space-y-6">
+              {/* Chat History Section */}
+              <div>
+                <h3 className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-4 px-4 py-2 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg border-l-4 border-purple-500 shadow-sm">
+                  📝 History
+                </h3>
+                <div className="space-y-3">
+                  <button className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:text-purple-700 dark:hover:text-purple-300 rounded-lg transition-all duration-200 border border-gray-200 dark:border-gray-700 hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-sm transform hover:-translate-y-0.5"
+                    onClick={() => setIsSidebarOpen(false)}>
+                    <div className="flex items-center space-x-3">
+                      <span className="text-lg">�</span>
+                      <span className="font-medium">Recent conversations</span>
+                    </div>
+                  </button>
+                  <div className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg cursor-pointer transition-colors duration-200">
+                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">Sleep better techniques</div>
+                    <div className="text-gray-500 dark:text-gray-500 mt-1">Yesterday, 8:45 PM</div>
+                  </div>
+                  <div className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg cursor-pointer transition-colors duration-200">
+                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">Anxiety coping strategies</div>
+                    <div className="text-gray-500 dark:text-gray-500 mt-1">2 days ago</div>
+                  </div>
+                  <div className="px-3 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg cursor-pointer transition-colors duration-200">
+                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">Meditation for beginners</div>
+                    <div className="text-gray-500 dark:text-gray-500 mt-1">1 week ago</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* User Profile Footer */}
+          <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-9 h-9 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center shadow-md">
+                  <span className="text-white text-sm font-semibold">
+                    {(user?.name || user?.email)?.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                    {user?.name || user?.email?.split('@')[0]}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                    {user?.email}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <ThemeToggle />
+                <Button variant="ghost" size="icon" onClick={handleLogout} title="Logout" className="h-8 w-8 hover:bg-purple-100 dark:hover:bg-purple-900/30">
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="lg:ml-64 flex-1 relative">
+        {/* Top Navigation Bar */}
+        <div className="absolute top-0 left-0 right-0 p-4 lg:p-6 z-20 flex justify-between items-center">
+          {/* Left side - New Chat Button (top-left on desktop, hidden on mobile when sidebar is closed) */}
+          <div className="hidden lg:block">
+            <button
+              onClick={handleNewChat}
+              className="flex items-center space-x-2 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white px-3 py-1.5 rounded-lg transition-all duration-300 hover:shadow-lg transform hover:scale-105 text-sm font-medium"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <path d="M12 5v14"/>
+                <path d="M5 12h14"/>
+              </svg>
+              <span>New Chat</span>
+            </button>
+          </div>
+
+          {/* Right side - Streak and Profile */}
+          <div className="flex items-center space-x-2 lg:space-x-3 ml-auto">
+            {/* New Chat Button - Mobile version (smaller and positioned with other nav items) */}
+            <button
+              onClick={handleNewChat}
+              className="lg:hidden flex items-center space-x-1.5 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white px-2 py-1 rounded-md transition-all duration-300 hover:shadow-lg transform hover:scale-105 text-xs font-medium"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                <path d="M12 5v14"/>
+                <path d="M5 12h14"/>
+              </svg>
+              <span>New</span>
+            </button>
+
+            {/* Login Streak */}
+            <div className="flex items-center space-x-1">
+              <span className="text-sm font-bold text-orange-600 dark:text-orange-400">
+                {loginStreak}
+              </span>
+              <div className="relative">
+                <span className="text-lg animate-pulse filter brightness-125">🔥</span>
+                <div className="absolute inset-0 text-lg animate-pulse opacity-60 blur-sm">🔥</div>
+              </div>
+            </div>
+            
+            {/* User Profile */}
+            <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg px-2 py-1.5 shadow-md border border-gray-200 dark:border-gray-700">
+              <div className="w-8 h-8 rounded-md overflow-hidden">
+                <img 
+                  src="/profile-pic.png" 
+                  alt="Profile" 
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <main className="min-h-screen flex items-center justify-center p-4 lg:p-6 pt-20 lg:pt-24">
+          {messages.length === 0 ? (
+            // Welcome Screen
+            <div className="text-center w-full max-w-4xl mx-auto px-4 sm:px-6">
+              {/* Cute Bouncy Robot - Responsive size */}
+              <div className="flex justify-center mb-6 lg:mb-8">
+                <div className="w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 flex items-center justify-center text-6xl sm:text-7xl lg:text-8xl">
+                    🤖
+                  </div>
+              </div>
+
+              {/* Dynamic Greeting - Responsive text */}
+              <div className="mb-4 lg:mb-6">
+                <h1 className="text-2xl sm:text-3xl lg:text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2 lg:mb-3 bg-gradient-to-r from-purple-600 via-purple-700 to-blue-600 bg-clip-text text-transparent px-4">
+                  {(() => {
+                    const hour = new Date().getHours();
+                    if (hour < 12) return `Good Morning, ${user?.name || user?.email?.split('@')[0]}`;
+                    if (hour < 17) return `Good Afternoon, ${user?.name || user?.email?.split('@')[0]}`;
+                    return `Good Evening, ${user?.name || user?.email?.split('@')[0]}`;
+                  })()}
+                </h1>
+                <p className="text-sm sm:text-base lg:text-base text-gray-600 dark:text-gray-400 font-light px-4">
+                  Your personal wellness companion, ready when you are.
+                </p>
+              </div>
+
+              {/* Chat Input Card - Responsive */}
+              <div className="max-w-full sm:max-w-2xl mx-auto px-4">
+                <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-4 lg:p-6 hover:shadow-xl transition-all duration-300">
+                  {/* Textarea - Responsive */}
+                  <div className="mb-4 lg:mb-6">
+                    <textarea
+                      value={input}
+                      onChange={handleInputChange}
+                      placeholder="Share what's on your mind or ask me anything about wellness..."
+                      className="w-full h-32 lg:h-40 px-4 lg:px-6 py-3 lg:py-4 text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-900/50 border-0 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all duration-200 placeholder-gray-500 dark:placeholder-gray-400 text-sm lg:text-base leading-relaxed"
+                      disabled={isChatLoading || isTyping}
+                    />
+                  </div>
+
+                  {/* Action Buttons and Send - Responsive */}
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    {/* Action Buttons */}
+                    <div className="flex items-center space-x-2">
+                      <button type="button" className="flex items-center space-x-1 lg:space-x-2 px-2 lg:px-3 py-1.5 lg:py-2 text-xs lg:text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-all duration-200 border border-gray-200 dark:border-gray-600 hover:border-purple-300 dark:hover:border-purple-500">
+                        <svg className="w-3 lg:w-3.5 h-3 lg:h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                          <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386z"/>
+                        </svg>
+                        <span className="hidden sm:inline">Quick Tips</span>
+                        <span className="sm:hidden">Tips</span>
+                      </button>
+                    </div>
+
+                    {/* Voice and Send Buttons */}
+                    <div className="flex items-center space-x-2">
+                      {/* Microphone Button */}
+                      <button type="button" className="flex items-center justify-center w-8 lg:w-10 h-8 lg:h-10 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 rounded-lg transition-all duration-300 hover:shadow-md transform hover:scale-105 border border-gray-200 dark:border-gray-600">
+                        <svg className="w-3.5 lg:w-4 h-3.5 lg:h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                          <line x1="12" x2="12" y1="19" y2="22"/>
+                          <line x1="8" x2="16" y1="22" y2="22"/>
+                        </svg>
+                      </button>
+                      
+                      {/* Send Button */}
+                      <button 
+                        type="submit"
+                        disabled={isChatLoading || isTyping || !input.trim()}
+                        className="flex items-center justify-center w-8 lg:w-10 h-8 lg:h-10 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-lg transition-all duration-300 hover:shadow-lg transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                      >
+                        {isChatLoading || isTyping ? (
+                          <div className="animate-spin rounded-full h-3.5 lg:h-4 w-3.5 lg:w-4 border-2 border-white border-t-transparent"></div>
+                        ) : (
+                          <svg className="w-3.5 lg:w-4 h-3.5 lg:h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                            <path d="M22 2L11 13"/>
+                            <path d="M22 2l-7 20-4-9-9-4 20-7z"/>
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          ) : (
+            // Chat Interface
+            <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 h-full flex flex-col">
+              {/* Chat Messages */}
+              <div className="flex-1 overflow-y-auto mb-4 space-y-4 max-h-[calc(100vh-200px)]">
+                {messages.map((message: Message, index: number) => (
+                  <div key={message.id || index} className={`flex items-start space-x-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {/* Bot Avatar - Left side for bot messages */}
+                    {message.role === 'assistant' && (
+                      <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center shadow-md">
+                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                          <path d="M12 8V4H8"/>
+                          <rect width="16" height="12" x="4" y="8" rx="2"/>
+                          <path d="M2 14h2"/>
+                          <path d="M20 14h2"/>
+                          <path d="M15 13v2"/>
+                          <path d="M9 13v2"/>
+                        </svg>
+                      </div>
+                    )}
+                    
+                    {/* Message Bubble */}
+                    <div className={`max-w-xs lg:max-w-md xl:max-w-lg px-4 py-2 rounded-2xl ${
+                      message.role === 'user' 
+                        ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-br-sm' 
+                        : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-bl-sm'
+                    }`}>
+                      <p className="text-sm lg:text-base whitespace-pre-wrap">{message.content}</p>
+                    </div>
+
+                    {/* User Avatar - Right side for user messages */}
+                    {message.role === 'user' && (
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden shadow-md border-2 border-purple-200 dark:border-purple-400">
+                        <img 
+                          src="/profile-pic.png" 
+                          alt="Your profile" 
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // Fallback to initials if image fails to load
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const fallback = target.nextElementSibling as HTMLElement;
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                        <div className="w-full h-full bg-gradient-to-r from-purple-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold" style={{display: 'none'}}>
+                          {(user?.name || user?.email)?.charAt(0).toUpperCase()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                {/* Typing Indicator */}
+                {isTyping && (
+                  <div className="flex items-start space-x-3 justify-start">
+                    {/* Bot Avatar */}
+                    <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full flex items-center justify-center shadow-md">
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M12 8V4H8"/>
+                        <rect width="16" height="12" x="4" y="8" rx="2"/>
+                        <path d="M2 14h2"/>
+                        <path d="M20 14h2"/>
+                        <path d="M15 13v2"/>
+                        <path d="M9 13v2"/>
+                      </svg>
+                    </div>
+                    
+                    {/* Typing Bubble */}
+                    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl rounded-bl-sm px-4 py-3">
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                        <div className="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Chat Input */}
+              <form onSubmit={handleSubmit} className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 p-4">
+                <div className="flex items-center space-x-2">
+                  <textarea
+                    value={input}
+                    onChange={handleInputChange}
+                    placeholder="Type your message..."
+                    className="flex-1 px-4 py-2 text-gray-900 dark:text-gray-100 bg-gray-50 dark:bg-gray-900/50 border-0 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all duration-200 placeholder-gray-500 dark:placeholder-gray-400 text-sm lg:text-base max-h-32"
+                    rows={1}
+                    disabled={isChatLoading || isTyping}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSubmit(e)
+                      }
+                    }}
+                  />
+                  <button 
+                    type="submit"
+                    disabled={isChatLoading || isTyping || !input.trim()}
+                    className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-lg transition-all duration-300 hover:shadow-lg transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  >
+                    {isChatLoading || isTyping ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M22 2L11 13"/>
+                        <path d="M22 2l-7 20-4-9-9-4 20-7z"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  )
+}
